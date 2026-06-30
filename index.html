@@ -823,78 +823,25 @@ document.querySelectorAll('.nav-item').forEach(item => {
 });
 
 // ─── GAS communication ───────────────────────────────────
-// GASはCORSの制限があるためJSONP方式で通信する
-function gasGet(params) {
-  return new Promise((resolve, reject) => {
-    if (!gasUrl) { reject(new Error('GAS URLが設定されていません')); return; }
-    const cbName = 'cb_' + Date.now();
-    const url = gasUrl + '?' + new URLSearchParams({ ...params, callback: cbName });
-    window[cbName] = function(data) {
-      delete window[cbName];
-      document.getElementById('jsonp-script')?.remove();
-      resolve(data);
-    };
-    const script = document.createElement('script');
-    script.id = 'jsonp-script';
-    script.src = url;
-    script.onerror = () => { delete window[cbName]; reject(new Error('GAS接続に失敗しました')); };
-    document.body.appendChild(script);
-    setTimeout(() => { delete window[cbName]; reject(new Error('タイムアウト（10秒）')); }, 10000);
-  });
+// fetch + CORS方式で通信する（GASのウェブアプリはCORSヘッダーを自動付与）
+async function gasGet(params) {
+  if (!gasUrl) throw new Error('GAS URLが設定されていません');
+  const url = gasUrl + '?' + new URLSearchParams(params);
+  const res = await fetch(url, { method: 'GET', redirect: 'follow' });
+  if (!res.ok) throw new Error('HTTPエラー: ' + res.status);
+  return res.json();
 }
 
-function gasPost(body) {
-  return new Promise((resolve, reject) => {
-    if (!gasUrl) { reject(new Error('GAS URLが設定されていません')); return; }
-    const cbName = 'cb_' + Date.now();
-    window[cbName] = function(data) {
-      delete window[cbName];
-      resolve(data);
-    };
-    const postStr = JSON.stringify(body);
-    const CHUNK = 1800;
-    if (postStr.length <= CHUNK) {
-      // 小さいデータはJSONPで送信
-      const allParams = new URLSearchParams({ callback: cbName, postdata: postStr });
-      const script = document.createElement('script');
-      script.id = 'jsonp-post-script-' + cbName;
-      script.src = gasUrl + '?' + allParams.toString();
-      script.onerror = () => { delete window[cbName]; reject(new Error('GAS接続に失敗しました')); };
-      document.body.appendChild(script);
-    } else {
-      // 大きいデータ（CSVインポート等）はiframe+formでPOST送信
-      let iframe = document.getElementById('gas-post-iframe');
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.name = 'gas-post-iframe';
-        iframe.id = 'gas-post-iframe';
-        iframe.style.display = 'none';
-        document.body.appendChild(iframe);
-      }
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = gasUrl;
-      form.target = 'gas-post-iframe';
-      form.style.display = 'none';
-      const inp = document.createElement('input');
-      inp.type = 'hidden'; inp.name = 'postdata'; inp.value = postStr;
-      form.appendChild(inp);
-      const cbInp = document.createElement('input');
-      cbInp.type = 'hidden'; cbInp.name = 'callback'; cbInp.value = cbName;
-      form.appendChild(cbInp);
-      document.body.appendChild(form);
-      form.submit();
-      form.remove();
-      // iframeからの返答を待つ（GASはiframe経由ではJSONPコールバックを返せないため
-      // 一定時間後に成功とみなしてスプレッドシートを確認してもらう）
-      setTimeout(() => {
-        delete window[cbName];
-        resolve({ success: true, note: 'iframe-post' });
-      }, 4000);
-      return;
-    }
-    setTimeout(() => { delete window[cbName]; reject(new Error('タイムアウト（15秒）')); }, 15000);
+async function gasPost(body) {
+  if (!gasUrl) throw new Error('GAS URLが設定されていません');
+  const res = await fetch(gasUrl, {
+    method: 'POST',
+    redirect: 'follow',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // text/plainはCORSのプリフライトを回避できる
+    body: JSON.stringify(body),
   });
+  if (!res.ok) throw new Error('HTTPエラー: ' + res.status);
+  return res.json();
 }
 
 // ─── Load data ────────────────────────────────────────────
