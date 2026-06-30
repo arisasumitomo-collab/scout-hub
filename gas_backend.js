@@ -1,5 +1,5 @@
 /**
- * ビズリーチ スカウト管理システム - Google Apps Script バックエンド（JSONP対応版）
+ * ビズリーチ スカウト管理システム - Google Apps Script バックエンド（fetch/CORS対応版）
  *
  * 【設置方法】
  * 1. Google スプレッドシートを新規作成
@@ -7,7 +7,7 @@
  * 3. このコードをすべて貼り付けて保存
  * 4. デプロイ > 新しいデプロイ > ウェブアプリ
  *    - 「次のユーザーとして実行」: 自分
- *    - 「アクセスできるユーザー」: 全員
+ *    - 「アクセスできるユーザー」: 全員（組織のポリシーで選択できない場合は組織内全員でOK）
  * 5. デプロイして発行されたURLをアプリの「設定」タブに入力
  */
 
@@ -17,40 +17,42 @@ const SHEET_NAMES = {
   SCOUT_DATA: 'scout',
 };
 
-// ─── メインエントリーポイント（JSONP対応）────────────────
+// ─── GET：データ取得 ───────────────────────────────────────
 function doGet(e) {
-  const callback = e.parameter.callback || '';
-  const postdata = e.parameter.postdata;
   let result;
-
   try {
-    if (postdata) {
-      // POSTデータをGETパラメータで受け取る（JSONP対応）
-      const body = JSON.parse(postdata);
+    const action = e.parameter.action;
+    if      (action === 'getAll')  result = getAllData();
+    else if (action === 'getJobs') result = getJobs();
+    else                           result = { error: 'unknown action: ' + action };
+  } catch (err) {
+    result = { error: err.message };
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ─── POST：データ保存 ───────────────────────────────────────
+function doPost(e) {
+  let result;
+  try {
+    const contents = e.postData && e.postData.contents;
+    if (!contents) { result = { error: 'no post body' }; }
+    else {
+      const body = JSON.parse(contents);
       const action = body.action;
       if      (action === 'saveJob')       result = saveJob(body.data);
       else if (action === 'saveActual')    result = saveActual(body.data);
       else if (action === 'saveScoutData') result = saveScoutData(body.data);
       else if (action === 'deleteJob')     result = deleteJob(body.jobId);
       else                                 result = { error: 'unknown action: ' + action };
-    } else {
-      const action = e.parameter.action;
-      if      (action === 'getAll')  result = getAllData();
-      else if (action === 'getJobs') result = getJobs();
-      else                           result = { error: 'unknown action: ' + action };
     }
   } catch (err) {
     result = { error: err.message };
   }
-
-  const json = JSON.stringify(result);
-  if (callback) {
-    return ContentService
-      .createTextOutput(callback + '(' + json + ')')
-      .setMimeType(ContentService.MimeType.JAVASCRIPT);
-  }
   return ContentService
-    .createTextOutput(json)
+    .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
